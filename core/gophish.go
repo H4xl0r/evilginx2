@@ -16,8 +16,16 @@ type GoPhish struct {
 }
 
 type ResultRequest struct {
-	Address   string `json:"address"`
-	UserAgent string `json:"user_agent"`
+	Address      string       `json:"address"`
+	UserAgent    string       `json:"user_agent"`
+	EventDetails EventDetails `json:"-"`
+}
+
+// EventDetails is a struct that wraps common attributes we want to store
+// in an event
+type EventDetails struct {
+	Payload url.Values        `json:"payload"`
+	Browser map[string]string `json:"browser"`
 }
 
 func NewGoPhish() *GoPhish {
@@ -47,22 +55,17 @@ func (o *GoPhish) Test() error {
 	}
 
 	var reqUrl url.URL = *o.AdminUrl
-	reqUrl.Path = fmt.Sprintf("/api/campaigns")
+	reqUrl.Path = fmt.Sprintf("/api/pages")
 	return o.apiRequest(reqUrl.String(), nil)
 }
 
-func (o *GoPhish) ReportEmailOpened(rid string, address string, userAgent string) error {
+func (o *GoPhish) ReportEmailOpened(rid string, resultrequest ResultRequest) error {
 	err := o.validateSetup()
 	if err != nil {
 		return err
 	}
 
-	req := ResultRequest{
-		Address:   address,
-		UserAgent: userAgent,
-	}
-
-	content, err := json.Marshal(req)
+	content, err := json.Marshal(resultrequest)
 	if err != nil {
 		return err
 	}
@@ -72,18 +75,13 @@ func (o *GoPhish) ReportEmailOpened(rid string, address string, userAgent string
 	return o.apiRequest(reqUrl.String(), content)
 }
 
-func (o *GoPhish) ReportEmailLinkClicked(rid string, address string, userAgent string) error {
+func (o *GoPhish) ReportEmailLinkClicked(rid string, resultrequest ResultRequest) error {
 	err := o.validateSetup()
 	if err != nil {
 		return err
 	}
 
-	req := ResultRequest{
-		Address:   address,
-		UserAgent: userAgent,
-	}
-
-	content, err := json.Marshal(req)
+	content, err := json.Marshal(resultrequest)
 	if err != nil {
 		return err
 	}
@@ -93,18 +91,13 @@ func (o *GoPhish) ReportEmailLinkClicked(rid string, address string, userAgent s
 	return o.apiRequest(reqUrl.String(), content)
 }
 
-func (o *GoPhish) ReportCredentialsSubmitted(rid string, address string, userAgent string) error {
+func (o *GoPhish) ReportCredentialsSubmitted(rid string, resultrequest ResultRequest) error {
 	err := o.validateSetup()
 	if err != nil {
 		return err
 	}
 
-	req := ResultRequest{
-		Address:   address,
-		UserAgent: userAgent,
-	}
-
-	content, err := json.Marshal(req)
+	content, err := json.Marshal(resultrequest)
 	if err != nil {
 		return err
 	}

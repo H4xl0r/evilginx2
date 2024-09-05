@@ -1,0 +1,40 @@
+{
+  "blacklist": {
+    "mode": "unauth"
+  },
+  "general": {
+    "domain": "127.0.0.1",
+    "ipv4": "",
+    "external_ipv4": "127.0.0.1",
+    "bind_ipv4": "0.0.0.0",
+    "unauth_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "https_port": 4444,
+    "dns_port": 53,
+    "autocert": false
+  },
+  "lures": [
+    {
+      "hostname": "127.0.0.1",
+      "id": "",
+      "info": "",
+      "og_desc": "",
+      "og_image": "",
+      "og_title": "",
+      "og_url": "",
+      "path": "/TdRwegWx",
+      "paused": 0,
+      "phishlet": "example",
+      "redirect_url": "",
+      "redirector": "",
+      "ua_filter": ""
+    }
+  ],
+  "phishlets": {
+    "example": {
+      "hostname": "127.0.0.1",
+      "unauth_url": "",
+      "enabled": true,
+      "visible": true
+    }
+  }
+}

